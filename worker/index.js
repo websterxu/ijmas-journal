@@ -1,4 +1,14 @@
 const NAME = "International Journal of Management and Administration Studies";
+const SITE_DASHBOARD = "/workspace/site";
+const SITE_SETTINGS = "settings/public-content.json";
+const SITE_FIELDS = {
+  introduction: {label:"Homepage introduction", max:1200, initial:"A forum for research on how organizations are managed and how institutions are administered."},
+  announcement: {label:"Homepage announcement (optional)", max:1500, initial:""},
+  scope: {label:"Guidelines introduction", max:1200, initial:"IJMAS welcomes original research, theoretical work, and review articles in management and administration studies."},
+  preparation: {label:"Submission instructions", max:6000, initial:"1. Prepare the title, author names in publication order, and abstract.\n2. Save the anonymized manuscript as a PDF or Word (.docx) file. Remove author names, affiliations, acknowledgments, and identifying file metadata. In Word, also clear comments and resolve tracked changes.\n3. Sign in and upload the manuscript. Track its status in your workspace."},
+  review: {label:"Review and publication guidance", max:6000, initial:"Editors assign reviewers to the anonymized manuscript. Reviewers submit recommendations and comments. Editors communicate decisions through the author workspace and can request a revised manuscript.\n\nFollowing acceptance, the editor verifies and uploads the final publication PDF. Readers can access published PDFs without signing in."},
+  contact: {label:"Public contact email (optional)", max:254, initial:""}
+};
 const MAX = 10 * 1024 * 1024;
 const FORMATS = {
   pdf:"application/pdf",
@@ -141,10 +151,31 @@ const options = (map) => Object.entries(map).map(([value,label]) => `<option val
 const articleList = (papers) => papers.length ? `<ul class="list">${papers.map(p => `<li><div class="kicker">Open access � ${date(p.published)}</div><h3><a href="/articles/${p.id}">${e(p.title)}</a></h3><div>${e(p.authors)}</div></li>`).join("")}</ul>` : '<p class="muted">The journal archive is awaiting its first published article.</p>';
 const paperList = (papers) => papers.length ? `<ul class="list">${papers.map(p => `<li>${badge(p)} <a href="/workspace/papers/${p.id}">${e(p.title)}</a><br><small>Submitted ${date(p.created)}</small></li>`).join("")}</ul>` : '<p class="muted">There are no manuscripts in this queue.</p>';
 
-function guidelines() {
-  return `<div class="kicker">For authors</div><h1>Submission guidelines</h1><p class="intro">IJMAS welcomes original research, theoretical work, and review articles in management and administration studies.</p>
-  <div class="split"><section class="panel"><h2>Prepare the submission</h2><ol><li>Prepare the title, author names in publication order, and abstract.</li><li>Save the anonymized manuscript as a PDF or Word (.docx) file. Remove author names, affiliations, acknowledgments, and identifying file metadata. In Word, also clear comments and resolve tracked changes.</li><li>Sign in and upload the manuscript. Track its status in your workspace.</li></ol></section>
-  <section class="panel"><h2>Review and publication</h2><p>Editors assign reviewers to the anonymized manuscript. Reviewers submit recommendations and comments. Editors communicate decisions through the author workspace and can request a revised manuscript.</p><p>Following acceptance, the editor verifies and uploads the final publication PDF. Readers can access published PDFs without signing in.</p></section></div>
+function siteContent(record) {
+  return Object.fromEntries(Object.entries(SITE_FIELDS).map(([name,field]) => [name,record?.data[name] ?? field.initial]));
+}
+
+function siteDashboard(record, person, saved) {
+  const content = siteContent(record);
+  const fields = Object.entries(SITE_FIELDS).map(([name,{label,max,initial}]) => {
+    if (name === "contact") return `<label>${e(label)}<input name="contact" type="email" maxlength="${max}" value="${e(content[name])}"></label>`;
+    return `<label>${e(label)}<textarea name="${name}" maxlength="${max}" ${initial ? "required" : ""}>\n${e(content[name])}</textarea></label>`;
+  }).join("");
+  return shell("Owner dashboard",`<p><a href="/workspace">Journal workspace</a></p><div class="kicker">Site management</div><h1>Owner dashboard</h1>
+  <p class="intro">Edit the public homepage and author guidelines. Saved changes appear immediately.</p>
+  ${saved ? '<p class="notice" role="status">Website content saved.</p>' : ""}
+  <section class="panel"><h2>Public website content</h2>${form(SITE_DASHBOARD,'<input type="hidden" name="version" value="' + e(record?.etag ?? "new") + '">' + fields,"Save website changes")}</section>
+  <div class="actions">${button("/","View homepage","secondary")}${button("/guidelines","View author guidelines","secondary")}</div>`,person);
+}
+
+function guidelines(content) {
+  const preparation = content.preparation === SITE_FIELDS.preparation.initial
+    ? "<ol>" + content.preparation.split("\n").map(line => "<li>" + e(line.slice(3)) + "</li>").join("") + "</ol>"
+    : "<p>" + para(content.preparation) + "</p>";
+  const review = content.review.split(/\r?\n\r?\n/).map(paragraph => "<p>" + para(paragraph) + "</p>").join("");
+  return `<div class="kicker">For authors</div><h1>Submission guidelines</h1><p class="intro">${para(content.scope)}</p>
+  <div class="split"><section class="panel abstract"><h2>Prepare the submission</h2>${preparation}</section>
+  <section class="panel abstract"><h2>Review and publication</h2>${review}</section></div>
   <div class="actions">${button("/submit","Submit a manuscript")}</div>`;
 }
 
@@ -206,11 +237,14 @@ async function handle(request, env) {
     if (request.headers.get("Origin") !== url.origin) fail(403,"Open the form directly from the journal website.");
     if (Number(request.headers.get("Content-Length")) > MAX + 50000) fail(413,"The file exceeds the upload limit.");
   }
-  if (request.method !== "POST" && path === "/") {
-    return shell("Home",`<section class="hero"><div class="kicker">Scholarly publishing � Open access</div><h1>${NAME}</h1><p>A forum for research on how organizations are managed and how institutions are administered.</p><div class="actions">${button("/articles","Explore articles")}${button("/submit","Submit a manuscript","secondary")}</div></section>
+  if (request.method !== "POST" && (path === "/" || path === "/guidelines")) {
+    const content = siteContent(bucket ? await read(bucket,SITE_SETTINGS) : null);
+    if (path === "/guidelines") return shell("Submission guidelines",guidelines(content),person);
+    return shell("Home",`<section class="hero"><div class="kicker">Scholarly publishing � Open access</div><h1>${NAME}</h1><p>${para(content.introduction)}</p><div class="actions">${button("/articles","Explore articles")}${button("/submit","Submit a manuscript","secondary")}</div></section>
+    ${content.announcement ? '<section class="panel abstract"><h2>Announcement</h2><p>' + para(content.announcement) + '</p></section>' : ""}
+    ${content.contact ? '<section class="panel abstract"><h2>Contact the journal</h2><p><a href="mailto:' + encodeURIComponent(content.contact).replace("%40","@") + '">' + e(content.contact) + '</a></p></section>' : ""}
     <div class="split"><section class="panel"><div class="kicker">01 / Read</div><h2>Research archive</h2><p>Browse published articles and download their full-text PDFs.</p><p><a href="/articles">Visit the archive</a></p></section><section class="panel"><div class="kicker">02 / Contribute</div><h2>For authors</h2><p>Prepare an anonymized manuscript, submit it for consideration, and follow editorial decisions in your workspace.</p><p><a href="/guidelines">Read the guidelines</a></p></section><section class="panel"><div class="kicker">03 / Evaluate</div><h2>For reviewers and editors</h2><p>Access assigned manuscripts, submit peer reviews, or manage editorial decisions.</p><p><a href="/workspace">Open the workspace</a></p></section></div>`,person);
   }
-  if (request.method !== "POST" && path === "/guidelines") return shell("Submission guidelines",guidelines(),person);
   if (!bucket) fail(503,"Journal storage is temporarily unavailable.");
   if (request.method !== "POST" && path === "/articles") {
     const published = (await list(bucket,o => o.customMetadata?.status === "published")).filter(p => p.status === "published");
@@ -225,7 +259,7 @@ async function handle(request, env) {
     return publicPath[2] ? download(bucket,p.finalPdf,p.id,true) : article(p,person,url);
   }
   const privatePath = /^\/workspace\/papers\/([^/]+)(?:\/([a-z]+))?$/.exec(path);
-  if (!["/submit","/workspace","/workspace/setup"].includes(path) && !privatePath) fail(404,"This page could not be found.");
+  if (!["/submit","/workspace","/workspace/setup",SITE_DASHBOARD].includes(path) && !privatePath) fail(404,"This page could not be found.");
   if (!person) {
     if (request.method === "POST") fail(401,"Sign in to use the journal workspace.");
     const github = env.AUTH_PROVIDER === "github";
@@ -234,6 +268,20 @@ async function handle(request, env) {
   }
   const chief = await read(bucket,"settings/editor.json");
   const editor = chief?.data.id === person.id;
+  if (path === SITE_DASHBOARD) {
+    if (!editor) fail(403,"Only the journal owner can manage the website.");
+    const record = await read(bucket,SITE_SETTINGS);
+    if (request.method !== "POST") return siteDashboard(record,person,url.searchParams.has("saved"));
+    const data = await request.formData();
+    if (data.get("version") !== (record?.etag ?? "new")) fail(409,"Website content changed in another session. Reopen the owner dashboard and try again.");
+    const content = Object.fromEntries(Object.entries(SITE_FIELDS).map(([name,{max,initial}]) => [name,field(data,name,max,Boolean(initial))]));
+    if (content.contact && !/^[^\s@<>]+@[a-z0-9.-]+\.[a-z]{2,}$/i.test(content.contact)) fail(400,"Enter a valid public contact email address.");
+    const saved = await bucket.put(SITE_SETTINGS,JSON.stringify(content),{
+      onlyIf:record ? {etagMatches:record.etag} : {etagDoesNotMatch:"*"}
+    });
+    if (!saved) fail(409,"Website content changed in another session. Reopen the owner dashboard and try again.");
+    return redirect(SITE_DASHBOARD + "?saved=1");
+  }
   if (path === "/workspace/setup") {
     if (chief) fail(403,"The editorial account has already been activated.");
     if (!env.EDITOR_SETUP_CODE) fail(503,"Editorial setup is temporarily unavailable.");
@@ -258,7 +306,7 @@ async function handle(request, env) {
     const mine = papers.filter(p=>p.owner === person.id);
     const assigned = papers.filter(p=>p.assignments.some(a=>a.email === person.email && a.round === p.round));
     return shell("Workspace",`<div class="kicker">IJMAS � Private workspace</div><h1>Journal workspace</h1><p class="muted">Signed in as ${e(person.email)}</p>
-    <div class="actions">${button("/submit","New submission")}</div><div class="split"><section class="panel"><h2>My submissions</h2>${paperList(mine)}</section><section class="panel"><h2>My review assignments</h2>${paperList(assigned)}</section></div>
+    <div class="actions">${button("/submit","New submission")}${editor ? button(SITE_DASHBOARD,"Owner dashboard","secondary") : ""}</div><div class="split"><section class="panel"><h2>My submissions</h2>${paperList(mine)}</section><section class="panel"><h2>My review assignments</h2>${paperList(assigned)}</section></div>
     ${editor ? '<section class="panel"><h2>Editorial queue</h2>' + paperList(papers) + '</section>' : ""}`,person);
   }
   if (!privatePath || !ID.test(privatePath[1])) fail(404,"Manuscript not found.");

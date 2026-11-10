@@ -53,6 +53,44 @@ assert.match(await (await expect("/articles",null,null,200)).text(),/awaiting it
 await expect("/workspace/setup","editor",{code:"wrong"},403);
 await expect("/workspace/setup","editor",{code:"test-fixture"},303);
 await expect("/workspace/setup","other",{code:"test-fixture"},403);
+const dashboard = "/workspace/site";
+const settings = {
+  version:"new",
+  introduction:"Research on leadership & governance",
+  announcement:"<script>example</script>",
+  scope:"We welcome management case studies.",
+  preparation:"Prepare an anonymized file.",
+  review:"Peer review precedes the publication decision.",
+  contact:"editor@example.test"
+};
+assert.match(await (await expect("/",null,null,200)).text(),/A forum for research/);
+assert.match(await (await expect("/guidelines",null,null,200)).text(),/Prepare the title/);
+assert.match(await (await expect("/workspace","editor",null,200)).text(),/Owner dashboard/);
+assert.doesNotMatch(await (await expect("/workspace","author",null,200)).text(),/Owner dashboard/);
+assert.match(await (await expect(dashboard,null,null,200)).text(),/Sign in to IJMAS/);
+await expect(dashboard,null,settings,401);
+await expect(dashboard,"author",null,403);
+await expect(dashboard,"reviewer",settings,403);
+assert.equal((await call(dashboard,"editor",settings,true)).status,403);
+await expect(dashboard,"editor",{...settings,contact:"invalid"},400);
+await expect(dashboard,"editor",{...settings,introduction:"x".repeat(1201)},400);
+assert.equal((await expect(dashboard,"editor",settings,303)).headers.get("location"),dashboard + "?saved=1");
+await expect(dashboard,"editor",settings,409);
+const homepage = await (await expect("/",null,null,200)).text();
+assert.match(homepage,/Research on leadership &amp; governance/);
+assert.match(homepage,/&lt;script&gt;example&lt;\/script&gt;/);
+assert.doesNotMatch(homepage,/<script>/);
+assert.match(homepage,/href="mailto:editor@example.test"/);
+const updatedGuidelines = await (await expect("/guidelines",null,null,200)).text();
+assert.match(updatedGuidelines,/We welcome management case studies/);
+assert.match(updatedGuidelines,/Prepare an anonymized file/);
+assert.match(updatedGuidelines,/Peer review precedes/);
+const editorPage = await (await expect(dashboard + "?saved=1","editor",null,200)).text();
+assert.match(editorPage,/Website content saved/);
+assert.match(editorPage,/Research on leadership &amp; governance/);
+const [,version] = editorPage.match(/name="version" value="([^"]+)"/);
+await expect(dashboard,"editor",{...settings,version,announcement:"",contact:""},303);
+assert.doesNotMatch(await (await expect("/",null,null,200)).text(),/Announcement|Contact the journal/);
 const fields = {title:"Management & Administration",authors:"Confidential Author",abstract:"Example abstract",PDF:pdf,anonymous:"yes"};
 await expect("/submit",null,fields,401);
 assert.equal((await call("/submit","author",fields,true)).status,403);

@@ -21,6 +21,10 @@ node build.mjs
 
 The test uses a simulated bucket and signed-in identities. It checks the editorial workflow and role boundaries without contacting reviewers or creating live articles.
 
+## Edit the public website
+
+Sign in with the activated editorial account, open **Workspace**, and select **Owner dashboard**. Update the homepage introduction, announcement, author guidelines, or public contact email, then select **Save website changes**. Changes appear immediately on the public pages. Clear the announcement or contact email to remove it. Website content is stored alongside journal settings and persists across deploys when the deployment uses durable storage.
+
 ## Hosting
 
 The Cloudflare Worker entry point builds to `dist/server/index.js`. A deployment must bind a private R2 bucket as `BUCKET`. The GitHub repository contains the source. The journal requires a server runtime for sign-in, manuscript storage, reviewer access, and publication. The site depends on Sites-managed ChatGPT authentication. A direct Worker deployment must provide a trusted authentication gateway that strips incoming identity headers and injects verified identities.
