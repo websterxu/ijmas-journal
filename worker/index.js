@@ -12,15 +12,15 @@ const para = (v) => e(v).replaceAll("\n", "<br>");
 const now = () => new Date().toISOString();
 const date = (v) => v.slice(0, 10);
 const key = (id) => "papers/" + id + ".json";
-const signIn = (path) => "/signin-with-chatgpt?return_to=" + encodeURIComponent(path);
+const signIn = (path,github) => (github ? "/oauth/start" : "/signin-with-chatgpt") + "?return_to=" + encodeURIComponent(path);
 const header = {"X-Content-Type-Options":"nosniff", "Referrer-Policy":"same-origin", "Cache-Control":"no-store", "X-Frame-Options":"DENY"};
 const redirect = (path) => new Response(null, {status:303,headers:{...header,Location:path}});
 const fail = (status, message) => { throw Object.assign(new Error(message), {status}); };
 
-function identity(request) {
+function identity(request, provider) {
   const id = request.headers.get("oai-authenticated-user-id");
   const email = request.headers.get("oai-authenticated-user-email")?.trim().toLowerCase();
-  return id && email ? {id,email} : null;
+  return id && email ? {id,email,provider} : null;
 }
 
 async function read(bucket, path) {
@@ -125,7 +125,7 @@ async function download(bucket, path, id, published) {
 
 function shell(title, body, person, status=200, meta="") {
   return new Response(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${e(title)} | IJMAS</title>${meta}<style>${CSS}</style></head><body>
-  <header><div class="bar"><a class="brand" href="/" aria-label="IJMAS home">IJ<span>MAS</span></a><nav aria-label="Main navigation"><a href="/articles">Articles</a><a href="/guidelines">Author guidelines</a><a href="/workspace">Workspace</a>${person ? '<a href="/signout-with-chatgpt?return_to=%2F">Sign out</a>' : ''}</nav></div></header>
+  <header><div class="bar"><a class="brand" href="/" aria-label="IJMAS home">IJ<span>MAS</span></a><nav aria-label="Main navigation"><a href="/articles">Articles</a><a href="/guidelines">Author guidelines</a><a href="/workspace">Workspace</a>${person ? '<a href="' + (person.provider === "github" ? "/oauth/logout" : "/signout-with-chatgpt?return_to=%2F") + '">Sign out</a>' : ''}</nav></div></header>
   <main>${body}</main><footer><div class="foot"><strong>IJMAS</strong><span>${NAME}</span><a href="/guidelines">Submission guidelines</a></div></footer></body></html>`,{status,headers:{...header,"Content-Type":"text/html; charset=utf-8","Content-Security-Policy":"default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"}});
 }
 
@@ -199,7 +199,7 @@ function detail(p, person, editor, assigned) {
 async function handle(request, env) {
   const url = new URL(request.url);
   const path = url.pathname;
-  const person = identity(request);
+  const person = identity(request,env.AUTH_PROVIDER);
   const bucket = env.BUCKET;
   if (!["GET","HEAD","POST"].includes(request.method)) fail(405,"Method unavailable.");
   if (request.method === "POST") {
@@ -228,7 +228,9 @@ async function handle(request, env) {
   if (!["/submit","/workspace","/workspace/setup"].includes(path) && !privatePath) fail(404,"This page could not be found.");
   if (!person) {
     if (request.method === "POST") fail(401,"Sign in to use the journal workspace.");
-    return shell("Journal sign-in",`<div class="kicker">Private workspace</div><h1>Sign in to IJMAS</h1><p class="intro">Use your ChatGPT account to submit papers, view review assignments, and access editorial tools. Reviewers should use the email address on their invitation.</p><div class="actions">${button(signIn(path),"Sign in with ChatGPT")}</div>`,null);
+    const github = env.AUTH_PROVIDER === "github";
+    const provider = github ? "GitHub" : "ChatGPT";
+    return shell("Journal sign-in",`<div class="kicker">Private workspace</div><h1>Sign in to IJMAS</h1><p class="intro">Use your ${provider} account to submit papers, view review assignments, and access editorial tools. ${github ? "Review invitations must match your verified primary GitHub email." : "Reviewers should use the email address on their invitation."}</p><div class="actions">${button(signIn(path,github),"Sign in with " + provider)}</div>`,null);
   }
   const chief = await read(bucket,"settings/editor.json");
   const editor = chief?.data.id === person.id;
@@ -316,6 +318,6 @@ export default { async fetch(request, env) {
     return request.method === "HEAD" ? new Response(null,{status:response.status,headers:response.headers}) : response;
   } catch (error) {
     if (!error.status) console.error("Journal request failed",error.name);
-    return shell("Journal notice",`<h1>${error.status === 404 ? "Page unavailable" : "Journal notice"}</h1><p>${e(error.status ? error.message : "The journal could not complete this request. Try again shortly.")}</p><p><a href="/workspace">Return to the workspace</a></p>`,identity(request),error.status || 500);
+    return shell("Journal notice",`<h1>${error.status === 404 ? "Page unavailable" : "Journal notice"}</h1><p>${e(error.status ? error.message : "The journal could not complete this request. Try again shortly.")}</p><p><a href="/workspace">Return to the workspace</a></p>`,identity(request,env.AUTH_PROVIDER),error.status || 500);
   }
 } };
