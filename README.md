@@ -4,7 +4,7 @@ The site has a public article archive and a private workspace for authors, assig
 
 ## Editorial workflow
 
-1. The author signs in with ChatGPT and uploads an anonymized PDF or Word (.docx) manuscript of up to 10 MB. Author names and the abstract are entered separately.
+1. The author signs in with ChatGPT and uploads an anonymized PDF or Word (.docx) manuscript of up to 10 MB. Enter the first author’s name and use **Add next author** for each additional author, up to seven total in publication order. Enter the abstract separately.
 2. The editor assigns reviewers by email. The invitation link opens the editor's email client with a draft. The editor sends the invitation there. Reviewers sign in with the assigned address to download the anonymized manuscript in its submitted format.
 3. Reviewers submit a recommendation and report. The editor records a decision letter visible to the author. An editor can decline a submission before review. Acceptance and revision requests require a completed review in the current round.
 4. An author asked to revise uploads a revised anonymized PDF or Word manuscript and a response. The editor assigns reviewers for the new round.

@@ -10,6 +10,22 @@ const SITE_FIELDS = {
   contact: {label:"Public contact email (optional)", max:254, initial:""}
 };
 const MAX = 10 * 1024 * 1024;
+const MAX_AUTHORS = 7;
+const MAX_AUTHOR_NAME = 240;
+const AUTHOR_FIELDS_SCRIPT = "/assets/author-fields.js";
+const AUTHOR_FIELDS_JS = `const group = document.getElementById("author-fields");
+const add = group.querySelector("button");
+const remaining = [...group.querySelectorAll("[data-additional-author]")];
+for (const row of remaining) row.hidden = true;
+add.hidden = false;
+add.addEventListener("click", () => {
+  const row = remaining.shift();
+  if (!row) return;
+  row.hidden = false;
+  row.querySelector("input").focus();
+  add.hidden = remaining.length === 0;
+});
+`;
 const FORMATS = {
   pdf:"application/pdf",
   docx:"application/vnd.openxmlformats-officedocument.wordprocessingml.document"
@@ -66,6 +82,24 @@ function field(form, name, max, required=true) {
   const clean = typeof value === "string" ? value.trim() : "";
   if ((required && !clean) || clean.length > max) fail(400,"Check the " + name + " field.");
   return clean;
+}
+
+function submissionAuthors(data) {
+  const entries = data.getAll("author");
+  if (!entries.length) {
+    const legacy = field(data,"authors",1000).split(";").map(name => name.trim()).filter(Boolean);
+    if (!legacy.length || legacy.length > MAX_AUTHORS) fail(400,"Enter one to seven authors.");
+    return legacy.join("; ");
+  }
+  if (entries.length > MAX_AUTHORS) fail(400,"Enter no more than seven authors.");
+  const authors = entries.map(entry => {
+    if (typeof entry !== "string" || entry.length > MAX_AUTHOR_NAME || /[;\r\n]/.test(entry)) {
+      fail(400,"Enter one author name per field.");
+    }
+    return entry.trim();
+  });
+  if (!authors[0]) fail(400,"Enter the first author’s name.");
+  return authors.filter(Boolean).join("; ");
 }
 
 function isWordDocument(bytes) {
@@ -133,10 +167,10 @@ async function download(bucket, path, id, published) {
     "Cache-Control":published ? "public, max-age=300" : "private, no-store"}});
 }
 
-function shell(title, body, person, status=200, meta="") {
+function shell(title, body, person, status=200, meta="", script="") {
   return new Response(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${e(title)} | IJMAS</title>${meta}<style>${CSS}</style></head><body>
   <header><div class="bar"><a class="brand" href="/" aria-label="IJMAS home">IJ<span>MAS</span></a><nav aria-label="Main navigation"><a href="/articles">Articles</a><a href="/guidelines">Author guidelines</a><a href="/workspace">Workspace</a>${person ? '<a href="' + (person.provider === "github" ? "/oauth/logout" : "/signout-with-chatgpt?return_to=%2F") + '">Sign out</a>' : ''}</nav></div></header>
-  <main>${body}</main><footer><div class="foot"><strong>IJMAS</strong><span>${NAME}</span><a href="/guidelines">Submission guidelines</a></div></footer></body></html>`,{status,headers:{...header,"Content-Type":"text/html; charset=utf-8","Content-Security-Policy":"default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"}});
+  <main>${body}</main><footer><div class="foot"><strong>IJMAS</strong><span>${NAME}</span><a href="/guidelines">Submission guidelines</a></div></footer>${script ? `<script src="${e(script)}" defer></script>` : ""}</body></html>`,{status,headers:{...header,"Content-Type":"text/html; charset=utf-8","Content-Security-Policy":"default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'" + (script ? "; script-src 'self'" : "")}});
 }
 
 const CSS = `*{box-sizing:border-box}html{color-scheme:light}body{margin:0;color:#172437;background:#f9f8f4;font:16px/1.6 system-ui,sans-serif}a{color:#145d53;text-underline-offset:4px}a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:3px solid #c37827;outline-offset:3px}header{background:#13253a;color:#fff}.bar,.foot{max-width:1140px;margin:auto;padding:18px 26px;display:flex;gap:24px;align-items:center;justify-content:space-between;flex-wrap:wrap}.brand{font:bold 28px Georgia,serif;letter-spacing:.06em;text-decoration:none;color:#fff}.brand span{color:#e3be81}nav{display:flex;gap:20px;flex-wrap:wrap}nav a{color:#fff;text-decoration:none;font-size:.94rem}nav a:hover{text-decoration:underline}main{max-width:1140px;min-height:70vh;padding:48px 26px 70px;margin:auto}.hero{background:#172d45;color:#fff;border-radius:8px;padding:clamp(28px,6vw,70px);border-bottom:5px solid #d9ae69;position:relative}.hero .kicker{color:#efd099}.hero h1{max-width:850px;font-size:clamp(2.45rem,6vw,4.5rem);margin:12px 0 20px}.hero p{max-width:630px;color:#e0e9f1}.hero .button{background:#f1cc8f;color:#182838}.hero .secondary{background:transparent;color:white;border:1px solid #b6c4d0}h1,h2,h3{font-family:Georgia,serif;line-height:1.14}h1{font-size:clamp(2.2rem,5vw,3.65rem);margin:.2em 0 .45em}h2{font-size:1.85rem;margin:.3em 0 .6em}h3{font-size:1.32rem;margin:.25em 0 .45em}.kicker{font-size:.75rem;font-weight:800;letter-spacing:.15em;text-transform:uppercase;color:#566452}.intro{color:#4c5c67;max-width:720px}.actions{display:flex;gap:12px;flex-wrap:wrap;margin-top:22px}.button,button{display:inline-block;background:#15594e;color:#fff;padding:10px 16px;border:1px solid transparent;border-radius:5px;text-decoration:none;font:inherit;font-weight:700;cursor:pointer}.secondary{background:#fff;color:#15594e;border:1px solid #bbcfc8}.split{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr));gap:24px;margin-top:28px}.panel{padding:24px;border:1px solid #dedfd8;border-radius:8px;background:#fff;margin-top:20px}.split .panel{margin-top:0}.panel p:last-child{margin-bottom:0}.section{margin-top:40px}.list{list-style:none;padding:0;margin:0}.list li{padding:14px 0;border-bottom:1px solid #e2e4de}.list li:last-child{border-bottom:0}.pill{display:inline-block;font-size:.79rem;font-weight:700;padding:3px 9px;border-radius:20px;background:#e7eee7;color:#234e3f}.muted,small{color:#52616c}form{display:grid;gap:13px;margin:16px 0;max-width:720px}label{display:grid;gap:5px;font-weight:650}input,select,textarea{width:100%;padding:10px;border:1px solid #aebbbd;background:#fff;border-radius:4px;font:inherit;color:inherit}textarea{min-height:110px}button{justify-self:start}.notice{padding:14px 17px;border-left:4px solid #ac6d27;background:#f8ebd7}.check{display:flex;align-items:flex-start;gap:10px}.check input{width:auto;margin-top:6px}.foot{justify-content:flex-start;color:#e1e8ed;font-size:.9rem}.foot a{color:#fff;margin-left:auto}footer{background:#13253a}.abstract{max-width:760px;overflow-wrap:anywhere}@media(max-width:520px){nav{gap:12px}main{padding-top:28px}.panel{padding:17px}}`;
@@ -144,6 +178,13 @@ const CSS = `*{box-sizing:border-box}html{color-scheme:light}body{margin:0;color
 const badge = (paper) => `<span class="pill">${state[paper.status]}</span>`;
 const button = (url,label,extra="") => `<a class="button ${extra}" href="${e(url)}"${url.startsWith("/signin-with-chatgpt?") ? ' target="_top"' : ''}>${e(label)}</a>`;
 const input = (name,label,max=240,type="text",required=true) => `<label>${e(label)}<input name="${e(name)}" type="${type}" maxlength="${max}" ${required ? "required" : ""}></label>`;
+function authorFields() {
+  const additional = Array.from({length:MAX_AUTHORS - 1},(_, index) =>
+    `<p data-additional-author>${input("author","Author " + (index + 2),MAX_AUTHOR_NAME,"text",false)}</p>`).join("");
+  return `<fieldset id="author-fields"><legend>Authors in publication order (up to ${MAX_AUTHORS})</legend>
+  ${input("author","Author 1",MAX_AUTHOR_NAME)}${additional}
+  <button type="button" class="secondary" hidden>Add next author</button></fieldset>`;
+}
 const area = (name,label,max,required=true) => `<label>${e(label)}<textarea name="${name}" maxlength="${max}" ${required ? "required" : ""}></textarea></label>`;
 const fileField = (label,manuscript=false) => `<label>${e(label)}<input type="file" name="${manuscript ? "manuscript" : "PDF"}" accept="${manuscript ? ".pdf,.docx" : "application/pdf,.pdf"}" required><small>${manuscript ? "PDF or Word (.docx)" : "PDF"}, up to 10 MB</small></label>`;
 const form = (action,fields,label,upload=false) => `<form method="post" action="${action}" ${upload ? 'enctype="multipart/form-data"' : ""}>${fields}<button type="submit">${label}</button></form>`;
@@ -233,6 +274,9 @@ async function handle(request, env) {
   const person = identity(request,env.AUTH_PROVIDER);
   const bucket = env.BUCKET;
   if (!["GET","HEAD","POST"].includes(request.method)) fail(405,"Method unavailable.");
+  if (request.method !== "POST" && path === AUTHOR_FIELDS_SCRIPT) {
+    return new Response(AUTHOR_FIELDS_JS,{headers:{...header,"Content-Type":"text/javascript; charset=utf-8"}});
+  }
   if (request.method === "POST") {
     if (request.headers.get("Origin") !== url.origin) fail(403,"Open the form directly from the journal website.");
     if (Number(request.headers.get("Content-Length")) > MAX + 50000) fail(413,"The file exceeds the upload limit.");
@@ -293,11 +337,11 @@ async function handle(request, env) {
     return redirect("/workspace");
   }
   if (path === "/submit") {
-    if (request.method !== "POST") return shell("Submit a manuscript",`<div class="kicker">Author workspace</div><h1>Submit a manuscript</h1><p class="intro">Use an anonymized PDF or Word document. Enter author names separately in publication order, separated by semicolons.</p>
-    <section class="panel">${form(path,input("title","Manuscript title") + input("authors","Author names",1000) + area("abstract","Abstract",6000) + fileField("Anonymized manuscript",true) + '<label class="check"><input type="checkbox" name="anonymous" value="yes" required> I removed identifying information from the manuscript and its file metadata.</label>',"Submit manuscript",true)}</section>`,person);
+    if (request.method !== "POST") return shell("Submit a manuscript",`<div class="kicker">Author workspace</div><h1>Submit a manuscript</h1><p class="intro">Upload an anonymized PDF or Word document. Enter the author names below in publication order.</p>
+    <section class="panel">${form(path,input("title","Manuscript title") + authorFields() + area("abstract","Abstract",6000) + fileField("Anonymized manuscript",true) + '<label class="check"><input type="checkbox" name="anonymous" value="yes" required> I removed identifying information from the manuscript and its file metadata.</label>',"Submit manuscript",true)}</section>`,person,200,"",AUTHOR_FIELDS_SCRIPT);
     const data = await request.formData();
     if (data.get("anonymous") !== "yes") fail(400,"Confirm that the manuscript is anonymized.");
-    const p = {id:crypto.randomUUID(),origin:url.origin,owner:person.id,ownerEmail:person.email,title:field(data,"title",240),authors:field(data,"authors",1000),abstract:field(data,"abstract",6000),created:now(),status:"submitted",round:1,assignments:[],decisions:[]};
+    const p = {id:crypto.randomUUID(),origin:url.origin,owner:person.id,ownerEmail:person.email,title:field(data,"title",240),authors:submissionAuthors(data),abstract:field(data,"abstract",6000),created:now(),status:"submitted",round:1,assignments:[],decisions:[]};
     await replaceFile(bucket,p,data,"manuscript");
     return redirect("/workspace/papers/" + p.id);
   }

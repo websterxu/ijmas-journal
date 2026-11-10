@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import {readFileSync} from "node:fs";
+import {runInNewContext} from "node:vm";
 import worker from "./worker/index.js";
 
 class Bucket {
@@ -35,7 +36,9 @@ const call = (path, user, fields, crossOrigin=false) => {
   if (fields) {
     headers.Origin = crossOrigin ? "https://other.test" : origin;
     body = new FormData();
-    for (const [name,value] of Object.entries(fields)) body.set(name,value);
+    for (const [name,value] of Object.entries(fields)) {
+      for (const entry of Array.isArray(value) ? value : [value]) body.append(name,entry);
+    }
   }
   return worker.fetch(new Request(origin + path,{headers,body,method:fields ? "POST" : "GET"}),env);
 };
@@ -92,15 +95,45 @@ const [,version] = editorPage.match(/name="version" value="([^"]+)"/);
 await expect(dashboard,"editor",{...settings,version,announcement:"",contact:""},303);
 assert.doesNotMatch(await (await expect("/",null,null,200)).text(),/Announcement|Contact the journal/);
 const fields = {title:"Management & Administration",authors:"Confidential Author",abstract:"Example abstract",PDF:pdf,anonymous:"yes"};
+const submissionPage = await expect("/submit","author",null,200);
+assert.match(submissionPage.headers.get("content-security-policy"),/script-src 'self'/);
+const submissionHtml = await submissionPage.text();
+assert.equal([...submissionHtml.matchAll(/name="author"/g)].length,7);
+assert.match(submissionHtml,/Add next author/);
+const authorScript = await expect("/assets/author-fields.js",null,null,200);
+assert.match(authorScript.headers.get("content-type"),/^text\/javascript/);
+let addAuthor;
+const addButton = {hidden:true,addEventListener:(_, handler) => {addAuthor = handler;}};
+const authorRows = Array.from({length:6},() => ({
+  hidden:false,
+  focused:false,
+  querySelector() { return {focus:() => {this.focused = true;}}; }
+}));
+const authorGroup = {querySelector:() => addButton,querySelectorAll:() => authorRows};
+runInNewContext(await authorScript.text(),{document:{getElementById:() => authorGroup}});
+assert.equal(addButton.hidden,false);
+assert.ok(authorRows.every(row => row.hidden));
+for (const [index,row] of authorRows.entries()) {
+  addAuthor();
+  assert.equal(row.focused,true);
+  assert.equal(authorRows.filter(row => !row.hidden).length,index + 1);
+}
+assert.equal(addButton.hidden,true);
+const authorNames = ["Confidential Author","Author Two","Author Three","Author Four","Author Five","Author Six","Author Seven"];
+await expect("/submit","author",{...fields,author:[...authorNames,"Author Eight"]},400);
+await expect("/submit","author",{...fields,authors:[...authorNames,"Author Eight"].join("; ")},400);
+await expect("/submit","author",{...fields,author:["Author One; Author Two"]},400);
+await expect("/submit","author",{...fields,author:["","Second Author"]},400);
 await expect("/submit",null,fields,401);
 assert.equal((await call("/submit","author",fields,true)).status,403);
 await expect("/submit","author",{...fields,PDF:new File(["invalid PDF header"],"wrong.pdf")},400);
 await expect("/submit","author",{...fields,manuscript:new File(["invalid DOCX content"],"wrong.docx",{type:wordType})},400);
-const wordSubmission = await expect("/submit","author",{...fields,manuscript:word},303);
+const wordSubmission = await expect("/submit","author",{...fields,author:["Single Author","","","","","",""],manuscript:word},303);
 const wordPaper = wordSubmission.headers.get("location");
 assert.match(await (await expect(wordPaper,"author",null,200)).text(),/Download anonymized manuscript \(Word/);
+assert.match(await (await expect(wordPaper,"author",null,200)).text(),/Single Author/);
 await expect(wordPaper + "/manuscript","stranger",null,404);
-const draft = await expect("/submit","author",fields,303);
+const draft = await expect("/submit","author",{...fields,author:authorNames},303);
 const paper = draft.headers.get("location");
 const pub = paper.replace("/workspace/papers","/articles");
 await expect(pub,null,null,404);
@@ -132,7 +165,9 @@ await expect(pub,null,null,404);
 await expect(paper + "/publish","author",{PDF:pdf,confirm:"yes"},403);
 await expect(paper + "/publish","editor",{PDF:word,confirm:"yes"},400);
 await expect(paper + "/publish","editor",{PDF:pdf,confirm:"yes"},303);
-assert.match(await (await expect(pub,null,null,200)).text(),/Confidential Author/);
+const articleHtml = await (await expect(pub,null,null,200)).text();
+assert.ok(articleHtml.includes(authorNames.join("; ")));
+assert.deepEqual([...articleHtml.matchAll(/name="citation_author" content="([^"]+)"/g)].map(match => match[1]),authorNames);
 assert.match(await (await expect("/articles",null,null,200)).text(),/Management &amp; Administration/);
 assert.equal(await (await expect(pub + "/pdf",null,null,200)).text(),await pdf.text());
 await expect(paper + "/pdf","reviewer",null,404);
