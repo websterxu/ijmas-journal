@@ -26,3 +26,11 @@ The test uses a simulated bucket and signed-in identities. It checks the editori
 The Cloudflare Worker entry point builds to `dist/server/index.js`. A deployment must bind a private R2 bucket as `BUCKET`. The GitHub repository contains the source. The journal requires a server runtime for sign-in, manuscript storage, reviewer access, and publication. The site depends on Sites-managed ChatGPT authentication. A direct Worker deployment must provide a trusted authentication gateway that strips incoming identity headers and injects verified identities.
 
 Configure a random `EDITOR_SETUP_CODE` as a secret in the site's runtime. The journal administrator signs in and enters that code at `/workspace/setup`. A successful activation binds the editorial role to that signed-in account. Remove the setup secret after activation. Before accepting live manuscripts, verify the editor, author, and reviewer sign-in paths and public PDF access with separate test accounts.
+
+## Deploy on Render
+
+1. Connect this GitHub repository to a Render Node web service on the `main` branch. Set `NODE_VERSION` to `24`. Use `node test-journal.mjs` as the build command and `node render-server.mjs` as the start command.
+2. Select a plan that supports a persistent disk, mount it at `/var/data`, and set `JOURNAL_DATA_DIR=/var/data`. Manuscripts and editorial records are stored in SQLite on that disk.
+3. Create a GitHub OAuth app using the Render service URL as its homepage and `https://YOUR-SERVICE.onrender.com/oauth/callback` as its authorization callback. Set `GITHUB_CLIENT_ID` and `GITHUB_CLIENT_SECRET` in Render.
+4. In Render, set `SESSION_SECRET` to a random secret of at least 32 characters and set a separate random `EDITOR_SETUP_CODE`. The app uses Render's external service URL as its public origin. Set `PUBLIC_ORIGIN` to the canonical HTTPS origin if you use a custom domain.
+5. After deployment, sign in at `/workspace/setup` to activate the editor. The Render deployment uses GitHub sign-in. Reviewers must use the verified primary email address on their GitHub account when accepting an invitation.
